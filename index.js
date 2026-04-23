@@ -7,9 +7,7 @@ const API_KEY = process.env.API_KEY;
 
 const symbols = ["BTC/USD", "XAU/USD"];
 
-// =========================
-// EMA
-// =========================
+// ================= EMA =================
 function ema(values, period) {
     let k = 2 / (period + 1);
     let arr = [values[0]];
@@ -20,12 +18,8 @@ function ema(values, period) {
     return arr;
 }
 
-// =========================
-// RSI (SAFE VERSION)
-// =========================
+// ================= RSI =================
 function rsi(values, period = 14) {
-    if (values.length < period + 1) return 50;
-
     let gains = 0, losses = 0;
 
     for (let i = values.length - period; i < values.length - 1; i++) {
@@ -41,118 +35,109 @@ function rsi(values, period = 14) {
     return 100 - (100 / (1 + rs));
 }
 
-// =========================
-// SAFE API FETCH
-// =========================
-async function getData(symbol) {
-    try {
-        const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1h&outputsize=100&apikey=${API_KEY}`;
-        const res = await axios.get(url);
-
-        // 🔥 DEBUG (Actions logs)
-        console.log("API RESPONSE:", symbol, res.data);
-
-        if (!res.data || !res.data.values) {
-            console.log("API ERROR:", symbol, res.data);
-            return null;
-        }
-
-        return res.data.values.reverse();
-    } catch (err) {
-        console.log("REQUEST ERROR:", symbol, err.message);
-        return null;
-    }
-}
-
-// =========================
-// MAIN LOGIC
-// =========================
+// ================= MAIN =================
 async function run() {
+
+    if (!TOKEN || !CHAT_ID || !API_KEY) {
+        console.log("❌ Missing ENV variables");
+        return;
+    }
+
     let messages = [];
 
     for (let symbol of symbols) {
+        try {
+            const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1h&outputsize=120&apikey=${API_KEY}`;
+            const res = await axios.get(url);
 
-        let data = await getData(symbol);
-        if (!data || data.length < 50) continue;
+            if (!res.data || !res.data.values) {
+                console.log("API ERROR:", symbol, res.data);
+                continue;
+            }
 
-        let prices = data.map(d => parseFloat(d.close));
-        let last_price = prices.at(-1);
+            let data = [...res.data.values].reverse();
+            let prices = data.map(d => parseFloat(d.close));
 
-        // EMA
-        let ema9 = ema(prices, 9);
-        let ema21 = ema(prices, 21);
+            let last_price = prices.at(-1);
 
-        let last_ema9 = ema9.at(-1);
-        let last_ema21 = ema21.at(-1);
+            // EMA
+            let ema9 = ema(prices, 9);
+            let ema21 = ema(prices, 21);
 
-        let prev_ema9 = ema9.at(-2);
-        let prev_ema21 = ema21.at(-2);
+            let last_ema9 = ema9.at(-1);
+            let last_ema21 = ema21.at(-1);
 
-        // RSI
-        let last_rsi = rsi(prices);
+            let prev_ema9 = ema9.at(-2);
+            let prev_ema21 = ema21.at(-2);
 
-        // MACD (simple)
-        let macd = ema(prices, 12).at(-1) - ema(prices, 26).at(-1);
-        let macd_strength = Math.abs(macd);
+            // RSI
+            let last_rsi = rsi(prices);
 
-        let ema_diff = Math.abs(last_ema9 - last_ema21);
+            // MACD (simple)
+            let macd = ema(prices, 12).at(-1) - ema(prices, 26).at(-1);
+            let macd_strength = Math.abs(macd);
 
-        let signal = "⚪ NO SIGNAL";
-        let tp = "-";
-        let sl = "-";
+            let ema_diff = Math.abs(last_ema9 - last_ema21);
 
-        let bull = prev_ema9 < prev_ema21 && last_ema9 > last_ema21;
-        let bear = prev_ema9 > prev_ema21 && last_ema9 < last_ema21;
+            let signal = "⚪ NO SIGNAL";
+            let tp = "-", sl = "-";
 
-        // =========================
-        // STRONG BUY
-        // =========================
-        if (
-            bull &&
-            last_rsi > 50 && last_rsi < 65 &&
-            macd > 0 &&
-            macd_strength > 0.1 &&
-            ema_diff / last_price > 0.001
-        ) {
-            signal = "🔥 STRONG BUY";
-            tp = (last_price * 1.03).toFixed(2);
-            sl = (last_price * 0.985).toFixed(2);
-        }
+            let bull = prev_ema9 < prev_ema21 && last_ema9 > last_ema21;
+            let bear = prev_ema9 > prev_ema21 && last_ema9 < last_ema21;
 
-        // =========================
-        // STRONG SELL
-        // =========================
-        else if (
-            bear &&
-            last_rsi < 50 && last_rsi > 35 &&
-            macd < 0 &&
-            macd_strength > 0.1 &&
-            ema_diff / last_price > 0.001
-        ) {
-            signal = "🔥 STRONG SELL";
-            tp = (last_price * 0.97).toFixed(2);
-            sl = (last_price * 1.015).toFixed(2);
-        }
+            // ================= PRO FILTER =================
 
-        messages.push(
+            if (
+                bull &&
+                last_rsi > 45 && last_rsi < 75 &&
+                macd > 0 &&
+                macd_strength > 0.03 &&
+                ema_diff / last_price > 0.00025
+            ) {
+                signal = "🔥 STRONG BUY";
+                tp = (last_price * 1.025).toFixed(2);
+                sl = (last_price * 0.99).toFixed(2);
+            }
+
+            else if (
+                bear &&
+                last_rsi < 55 && last_rsi > 25 &&
+                macd < 0 &&
+                macd_strength > 0.03 &&
+                ema_diff / last_price > 0.00025
+            ) {
+                signal = "🔥 STRONG SELL";
+                tp = (last_price * 0.975).toFixed(2);
+                sl = (last_price * 1.01).toFixed(2);
+            }
+
+            else {
+                signal = "⚪ WEAK / WAIT";
+            }
+
+            messages.push(
 `*${symbol}*
 Signal: ${signal}
 Price: ${last_price}
 TP: ${tp} | SL: ${sl}
 RSI: ${last_rsi.toFixed(2)}`
-        );
+            );
+
+        } catch (err) {
+            console.log("ERROR:", symbol, err.message);
+        }
     }
 
-    if (messages.length === 0) {
-        console.log("No valid signals");
-        return;
+    // ================= TELEGRAM =================
+    try {
+        await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+            chat_id: CHAT_ID,
+            text: messages.join("\n\n") || "No signal",
+            parse_mode: "Markdown"
+        });
+    } catch (err) {
+        console.log("TELEGRAM ERROR:", err.response?.data || err.message);
     }
-
-    await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-        chat_id: CHAT_ID,
-        text: messages.join("\n\n"),
-        parse_mode: "Markdown"
-    });
 }
 
 run();
