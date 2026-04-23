@@ -27,3 +27,9 @@ jobs:
           TOKEN: ${{ secrets.TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           API_KEY: ${{ secrets.API_KEY }}
+
+      - name: Debug env (optional)
+        run: |
+          echo "TOKEN OK"
+          echo "CHAT_ID OK"
+          echo "API_KEY OK"
