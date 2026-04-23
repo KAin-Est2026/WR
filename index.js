@@ -34,30 +34,17 @@ function rsi(values, period = 14) {
     return 100 - (100 / (1 + rs));
 }
 
-// ================= SCORE ENGINE =================
-function calculateScore({ bull, bear, rsiVal, macd }) {
-    let score = 50;
-
-    if (bull) score += 15;
-    if (bear) score += 15;
-
-    if (macd > 0) score += 10;
-    if (macd < 0) score += 10;
-
-    if (rsiVal > 40 && rsiVal < 60) score += 10;
-
-    if (rsiVal > 70 || rsiVal < 30) score -= 20;
-
-    return Math.max(0, Math.min(100, score));
-}
-
 // ================= TELEGRAM =================
 async function send(text) {
-    await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-        chat_id: CHAT_ID,
-        text,
-        parse_mode: "Markdown"
-    });
+    try {
+        await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+            chat_id: CHAT_ID,
+            text,
+            parse_mode: "Markdown"
+        });
+    } catch (e) {
+        console.log("TG ERROR:", e.response?.data || e.message);
+    }
 }
 
 // ================= MAIN =================
@@ -76,7 +63,6 @@ async function run() {
 
         let price = prices.at(-1);
 
-        // indicators
         let ema9 = ema(prices, 9);
         let ema21 = ema(prices, 21);
 
@@ -86,46 +72,56 @@ async function run() {
         let bull = ema9.at(-1) > ema21.at(-1);
         let bear = ema9.at(-1) < ema21.at(-1);
 
-        // ================= SCORE =================
-        let score = calculateScore({ bull, bear, rsiVal, macd });
+        // ================= SWING =================
+        let swing = "⚪ NO SWING SIGNAL";
+        let swingEmoji = "😐";
 
-        let direction = "NEUTRAL";
-        let signal = "⚪ NO TRADE";
-
-        let tp = "-", sl = "-";
-
-        // ================= DECISION =================
-        if (score >= 80 && bull) {
-            direction = "BULLISH";
-            signal = "🔥 STRONG BUY";
-            tp = (price * 1.03).toFixed(2);
-            sl = (price * 0.985).toFixed(2);
+        if (bull && rsiVal < 70 && macd > 0) {
+            swing = "🔥 SWING BUY";
+            swingEmoji = "📈🚀";
         }
 
-        else if (score >= 80 && bear) {
-            direction = "BEARISH";
-            signal = "🔥 STRONG SELL";
-            tp = (price * 0.97).toFixed(2);
-            sl = (price * 1.015).toFixed(2);
+        else if (bear && rsiVal > 30 && macd < 0) {
+            swing = "🔥 SWING SELL";
+            swingEmoji = "📉⚡";
         }
 
-        else if (score >= 65) {
-            signal = "⚡ WEAK SIGNAL (skip recommended)";
+        // ================= SCALPING (BOOSTED) =================
+        let scalp = "⚪ NO SCALP";
+        let scalpEmoji = "😴";
+
+        // kuchaytirilgan scalping logic
+        if (rsiVal < 50 && macd > 0) {
+            scalp = "⚡ SCALP BUY";
+            scalpEmoji = "🟢⚡📊";
+        }
+
+        else if (rsiVal < 45 && macd > 0 && bull) {
+            scalp = "🚀 STRONG SCALP BUY";
+            scalpEmoji = "🔥🚀📈";
+        }
+
+        else if (rsiVal > 50 && macd < 0) {
+            scalp = "⚡ SCALP SELL";
+            scalpEmoji = "🔴⚡📉";
+        }
+
+        else if (rsiVal > 55 && macd < 0 && bear) {
+            scalp = "💥 STRONG SCALP SELL";
+            scalpEmoji = "🔥📉💣";
         }
 
         messages.push(
 `*${symbol}*
 
-Price: ${price}
+💰 Price: ${price}
 
-Score: ${score}/100
-Bias: ${direction}
+📊 SWING: ${swing} ${swingEmoji}
 
-Signal: ${signal}
+⚡ SCALP: ${scalp} ${scalpEmoji}
 
-TP: ${tp} | SL: ${sl}
-
-RSI: ${rsiVal.toFixed(2)}`
+📉 RSI: ${rsiVal.toFixed(2)}
+📈 MACD: ${macd.toFixed(2)}`
         );
     }
 
