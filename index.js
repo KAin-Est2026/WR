@@ -7,18 +7,17 @@ const API_KEY = process.env.API_KEY;
 
 const symbols = ["BTC/USD", "XAU/USD"];
 
-// ===== EMA =====
+// ================= EMA =================
 function ema(values, period) {
     let k = 2 / (period + 1);
     let arr = [values[0]];
-
     for (let i = 1; i < values.length; i++) {
         arr.push(values[i] * k + arr[i - 1] * (1 - k));
     }
     return arr;
 }
 
-// ===== RSI =====
+// ================= RSI =================
 function rsi(values, period = 14) {
     let gains = 0, losses = 0;
 
@@ -35,20 +34,33 @@ function rsi(values, period = 14) {
     return 100 - (100 / (1 + rs));
 }
 
-// ===== TELEGRAM =====
-async function send(text) {
-    try {
-        await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-            chat_id: CHAT_ID,
-            text,
-            parse_mode: "Markdown"
-        });
-    } catch (e) {
-        console.log("TG ERROR:", e.response?.data || e.message);
-    }
+// ================= SCORE ENGINE =================
+function calculateScore({ bull, bear, rsiVal, macd }) {
+    let score = 50;
+
+    if (bull) score += 15;
+    if (bear) score += 15;
+
+    if (macd > 0) score += 10;
+    if (macd < 0) score += 10;
+
+    if (rsiVal > 40 && rsiVal < 60) score += 10;
+
+    if (rsiVal > 70 || rsiVal < 30) score -= 20;
+
+    return Math.max(0, Math.min(100, score));
 }
 
-// ===== MAIN =====
+// ================= TELEGRAM =================
+async function send(text) {
+    await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+        chat_id: CHAT_ID,
+        text,
+        parse_mode: "Markdown"
+    });
+}
+
+// ================= MAIN =================
 async function run() {
     let messages = [];
 
@@ -64,61 +76,54 @@ async function run() {
 
         let price = prices.at(-1);
 
+        // indicators
         let ema9 = ema(prices, 9);
         let ema21 = ema(prices, 21);
 
         let rsiVal = rsi(prices);
-
         let macd = ema(prices, 12).at(-1) - ema(prices, 26).at(-1);
 
         let bull = ema9.at(-1) > ema21.at(-1);
         let bear = ema9.at(-1) < ema21.at(-1);
 
-        // =========================
-        // 🔵 SWING SYSTEM (1H trend)
-        // =========================
-        let swingSignal = "NO SWING";
-        let swingTP = "-", swingSL = "-";
+        // ================= SCORE =================
+        let score = calculateScore({ bull, bear, rsiVal, macd });
 
-        if (bull && rsiVal < 70 && macd > 0) {
-            swingSignal = "🔥 SWING BUY";
-            swingTP = (price * 1.03).toFixed(2);
-            swingSL = (price * 0.985).toFixed(2);
+        let direction = "NEUTRAL";
+        let signal = "⚪ NO TRADE";
+
+        let tp = "-", sl = "-";
+
+        // ================= DECISION =================
+        if (score >= 80 && bull) {
+            direction = "BULLISH";
+            signal = "🔥 STRONG BUY";
+            tp = (price * 1.03).toFixed(2);
+            sl = (price * 0.985).toFixed(2);
         }
 
-        else if (bear && rsiVal > 30 && macd < 0) {
-            swingSignal = "🔥 SWING SELL";
-            swingTP = (price * 0.97).toFixed(2);
-            swingSL = (price * 1.015).toFixed(2);
+        else if (score >= 80 && bear) {
+            direction = "BEARISH";
+            signal = "🔥 STRONG SELL";
+            tp = (price * 0.97).toFixed(2);
+            sl = (price * 1.015).toFixed(2);
         }
 
-        // =========================
-        // ⚡ SCALPING SYSTEM (aggressive)
-        // =========================
-        let scalpSignal = "NO SCALP";
-        let scalpTP = "-", scalpSL = "-";
-
-        if (rsiVal < 48 && macd > 0) {
-            scalpSignal = "⚡ SCALP BUY";
-            scalpTP = (price * 1.008).toFixed(2);
-            scalpSL = (price * 0.995).toFixed(2);
-        }
-
-        else if (rsiVal > 52 && macd < 0) {
-            scalpSignal = "⚡ SCALP SELL";
-            scalpTP = (price * 0.992).toFixed(2);
-            scalpSL = (price * 1.005).toFixed(2);
+        else if (score >= 65) {
+            signal = "⚡ WEAK SIGNAL (skip recommended)";
         }
 
         messages.push(
 `*${symbol}*
+
 Price: ${price}
 
-🔵 Swing: ${swingSignal}
-TP: ${swingTP} | SL: ${swingSL}
+Score: ${score}/100
+Bias: ${direction}
 
-⚡ Scalp: ${scalpSignal}
-TP: ${scalpTP} | SL: ${scalpSL}
+Signal: ${signal}
+
+TP: ${tp} | SL: ${sl}
 
 RSI: ${rsiVal.toFixed(2)}`
         );
