@@ -36,15 +36,11 @@ function rsi(values, period = 14) {
 
 // ================= TELEGRAM =================
 async function send(text) {
-    try {
-        await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-            chat_id: CHAT_ID,
-            text,
-            parse_mode: "Markdown"
-        });
-    } catch (e) {
-        console.log("TG ERROR:", e.response?.data || e.message);
-    }
+    await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+        chat_id: CHAT_ID,
+        text,
+        parse_mode: "Markdown"
+    });
 }
 
 // ================= MAIN =================
@@ -73,42 +69,53 @@ async function run() {
         let bear = ema9.at(-1) < ema21.at(-1);
 
         // ================= SWING =================
-        let swing = "⚪ NO SWING SIGNAL";
-        let swingEmoji = "😐";
+        let swingSignal = "⚪ NO SWING";
+        let swingEntry = "-", swingTP = "-", swingSL = "-";
 
         if (bull && rsiVal < 70 && macd > 0) {
-            swing = "🔥 SWING BUY";
-            swingEmoji = "📈🚀";
+            swingSignal = "🔥 SWING BUY";
+            swingEntry = price.toFixed(2);
+            swingTP = (price * 1.03).toFixed(2);
+            swingSL = (price * 0.985).toFixed(2);
         }
 
         else if (bear && rsiVal > 30 && macd < 0) {
-            swing = "🔥 SWING SELL";
-            swingEmoji = "📉⚡";
+            swingSignal = "🔥 SWING SELL";
+            swingEntry = price.toFixed(2);
+            swingTP = (price * 0.97).toFixed(2);
+            swingSL = (price * 1.015).toFixed(2);
         }
 
-        // ================= SCALPING (BOOSTED) =================
-        let scalp = "⚪ NO SCALP";
-        let scalpEmoji = "😴";
+        // ================= SCALPING =================
+        let scalpSignal = "⚪ NO SCALP";
+        let scalpEntry = "-", scalpTP = "-", scalpSL = "-";
 
-        // kuchaytirilgan scalping logic
         if (rsiVal < 50 && macd > 0) {
-            scalp = "⚡ SCALP BUY";
-            scalpEmoji = "🟢⚡📊";
+            scalpSignal = "⚡ SCALP BUY";
+            scalpEntry = price.toFixed(2);
+            scalpTP = (price * 1.008).toFixed(2);
+            scalpSL = (price * 0.995).toFixed(2);
         }
 
         else if (rsiVal < 45 && macd > 0 && bull) {
-            scalp = "🚀 STRONG SCALP BUY";
-            scalpEmoji = "🔥🚀📈";
+            scalpSignal = "🚀 STRONG SCALP BUY";
+            scalpEntry = price.toFixed(2);
+            scalpTP = (price * 1.012).toFixed(2);
+            scalpSL = (price * 0.993).toFixed(2);
         }
 
         else if (rsiVal > 50 && macd < 0) {
-            scalp = "⚡ SCALP SELL";
-            scalpEmoji = "🔴⚡📉";
+            scalpSignal = "⚡ SCALP SELL";
+            scalpEntry = price.toFixed(2);
+            scalpTP = (price * 0.992).toFixed(2);
+            scalpSL = (price * 1.005).toFixed(2);
         }
 
         else if (rsiVal > 55 && macd < 0 && bear) {
-            scalp = "💥 STRONG SCALP SELL";
-            scalpEmoji = "🔥📉💣";
+            scalpSignal = "💥 STRONG SCALP SELL";
+            scalpEntry = price.toFixed(2);
+            scalpTP = (price * 0.988).toFixed(2);
+            scalpSL = (price * 1.008).toFixed(2);
         }
 
         messages.push(
@@ -116,9 +123,17 @@ async function run() {
 
 💰 Price: ${price}
 
-📊 SWING: ${swing} ${swingEmoji}
+🔵 SWING:
+Signal: ${swingSignal}
+Entry: ${swingEntry}
+TP: ${swingTP}
+SL: ${swingSL}
 
-⚡ SCALP: ${scalp} ${scalpEmoji}
+⚡ SCALP:
+Signal: ${scalpSignal}
+Entry: ${scalpEntry}
+TP: ${scalpTP}
+SL: ${scalpSL}
 
 📉 RSI: ${rsiVal.toFixed(2)}
 📈 MACD: ${macd.toFixed(2)}`
