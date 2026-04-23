@@ -7,16 +7,25 @@ const API_KEY = process.env.API_KEY;
 
 const symbols = ["BTC/USD", "XAU/USD"];
 
+// =========================
+// EMA
+// =========================
 function ema(values, period) {
     let k = 2 / (period + 1);
     let arr = [values[0]];
+
     for (let i = 1; i < values.length; i++) {
         arr.push(values[i] * k + arr[i - 1] * (1 - k));
     }
     return arr;
 }
 
+// =========================
+// RSI (SAFE VERSION)
+// =========================
 function rsi(values, period = 14) {
+    if (values.length < period + 1) return 50;
+
     let gains = 0, losses = 0;
 
     for (let i = values.length - period; i < values.length - 1; i++) {
@@ -32,17 +41,42 @@ function rsi(values, period = 14) {
     return 100 - (100 / (1 + rs));
 }
 
+// =========================
+// SAFE API FETCH
+// =========================
+async function getData(symbol) {
+    try {
+        const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1h&outputsize=100&apikey=${API_KEY}`;
+        const res = await axios.get(url);
+
+        // 🔥 DEBUG (Actions logs)
+        console.log("API RESPONSE:", symbol, res.data);
+
+        if (!res.data || !res.data.values) {
+            console.log("API ERROR:", symbol, res.data);
+            return null;
+        }
+
+        return res.data.values.reverse();
+    } catch (err) {
+        console.log("REQUEST ERROR:", symbol, err.message);
+        return null;
+    }
+}
+
+// =========================
+// MAIN LOGIC
+// =========================
 async function run() {
     let messages = [];
 
     for (let symbol of symbols) {
 
-        const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1h&outputsize=100&apikey=${API_KEY}`;
-        const res = await axios.get(url);
+        let data = await getData(symbol);
+        if (!data || data.length < 50) continue;
 
-        let data = res.data.values.reverse();
         let prices = data.map(d => parseFloat(d.close));
-        let last_price = prices[prices.length - 1];
+        let last_price = prices.at(-1);
 
         // EMA
         let ema9 = ema(prices, 9);
@@ -57,22 +91,27 @@ async function run() {
         // RSI
         let last_rsi = rsi(prices);
 
-        // MACD
+        // MACD (simple)
         let macd = ema(prices, 12).at(-1) - ema(prices, 26).at(-1);
         let macd_strength = Math.abs(macd);
 
         let ema_diff = Math.abs(last_ema9 - last_ema21);
 
         let signal = "⚪ NO SIGNAL";
-        let tp = "-", sl = "-";
+        let tp = "-";
+        let sl = "-";
 
         let bull = prev_ema9 < prev_ema21 && last_ema9 > last_ema21;
         let bear = prev_ema9 > prev_ema21 && last_ema9 < last_ema21;
 
+        // =========================
+        // STRONG BUY
+        // =========================
         if (
             bull &&
             last_rsi > 50 && last_rsi < 65 &&
-            macd > 0 && macd_strength > 0.1 &&
+            macd > 0 &&
+            macd_strength > 0.1 &&
             ema_diff / last_price > 0.001
         ) {
             signal = "🔥 STRONG BUY";
@@ -80,10 +119,14 @@ async function run() {
             sl = (last_price * 0.985).toFixed(2);
         }
 
+        // =========================
+        // STRONG SELL
+        // =========================
         else if (
             bear &&
             last_rsi < 50 && last_rsi > 35 &&
-            macd < 0 && macd_strength > 0.1 &&
+            macd < 0 &&
+            macd_strength > 0.1 &&
             ema_diff / last_price > 0.001
         ) {
             signal = "🔥 STRONG SELL";
@@ -98,6 +141,11 @@ Price: ${last_price}
 TP: ${tp} | SL: ${sl}
 RSI: ${last_rsi.toFixed(2)}`
         );
+    }
+
+    if (messages.length === 0) {
+        console.log("No valid signals");
+        return;
     }
 
     await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
