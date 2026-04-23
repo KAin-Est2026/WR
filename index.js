@@ -7,7 +7,7 @@ const API_KEY = process.env.API_KEY;
 
 const symbols = ["BTC/USD", "XAU/USD"];
 
-// ===== EMA =====
+// ================= EMA =================
 function ema(values, period) {
     let k = 2 / (period + 1);
     let arr = [values[0]];
@@ -17,7 +17,7 @@ function ema(values, period) {
     return arr;
 }
 
-// ===== RSI =====
+// ================= RSI =================
 function rsi(values, period = 14) {
     let gains = 0, losses = 0;
 
@@ -34,115 +34,115 @@ function rsi(values, period = 14) {
     return 100 - (100 / (1 + rs));
 }
 
-// ===== SAFE FETCH =====
-async function getData(symbol) {
-    const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1h&outputsize=120&apikey=${API_KEY}`;
-    const res = await axios.get(url);
-
-    if (!res.data.values) {
-        console.log("API ERROR:", symbol, res.data);
-        return null;
-    }
-
-    return res.data.values.reverse();
-}
-
-// ===== STRATEGY =====
-function analyze(prices) {
-
-    let ema9 = ema(prices, 9);
-    let ema21 = ema(prices, 21);
-
-    let ema50 = ema(prices, 50);
-
-    let r = rsi(prices);
-    let price = prices.at(-1);
-
-    let crossUp = ema9.at(-2) < ema21.at(-2) && ema9.at(-1) > ema21.at(-1);
-    let crossDown = ema9.at(-2) > ema21.at(-2) && ema9.at(-1) < ema21.at(-1);
-
-    let trendBull = ema21.at(-1) > ema50.at(-1);
-    let trendBear = ema21.at(-1) < ema50.at(-1);
-
-    // ===== SCALPING =====
-    if (crossUp && r > 50 && r < 70) {
-        return {
-            type: "SCALPING BUY ⚡",
-            entry: price,
-            tp: price * 1.008,
-            sl: price * 0.996
-        };
-    }
-
-    if (crossDown && r < 50 && r > 30) {
-        return {
-            type: "SCALPING SELL ⚡",
-            entry: price,
-            tp: price * 0.992,
-            sl: price * 1.004
-        };
-    }
-
-    // ===== SWING =====
-    if (trendBull && r > 55 && crossUp) {
-        return {
-            type: "SWING BUY 🔥",
-            entry: price,
-            tp: price * 1.03,
-            sl: price * 0.985
-        };
-    }
-
-    if (trendBear && r < 45 && crossDown) {
-        return {
-            type: "SWING SELL 🔥",
-            entry: price,
-            tp: price * 0.97,
-            sl: price * 1.015
-        };
-    }
-
-    return null;
-}
-
-// ===== TELEGRAM =====
-async function send(msg) {
+// ================= TELEGRAM =================
+async function send(text) {
     await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
         chat_id: CHAT_ID,
-        text: msg,
+        text,
         parse_mode: "Markdown"
     });
 }
 
-// ===== RUN =====
+// ================= MAIN =================
 async function run() {
-
     let messages = [];
 
     for (let symbol of symbols) {
 
-        let data = await getData(symbol);
-        if (!data) continue;
+        const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1h&outputsize=120&apikey=${API_KEY}`;
+        const res = await axios.get(url);
 
+        if (!res.data?.values) continue;
+
+        let data = res.data.values.reverse();
         let prices = data.map(d => parseFloat(d.close));
 
-        let signal = analyze(prices);
+        let price = prices.at(-1);
 
-        if (!signal) {
-            messages.push(`*${symbol}*\nNo trade setup ⏳`);
-            continue;
+        let ema9 = ema(prices, 9);
+        let ema21 = ema(prices, 21);
+
+        let rsiVal = rsi(prices);
+        let macd = ema(prices, 12).at(-1) - ema(prices, 26).at(-1);
+
+        let bull = ema9.at(-1) > ema21.at(-1);
+        let bear = ema9.at(-1) < ema21.at(-1);
+
+        // ================= SWING =================
+        let swingSignal = "⚪ NO SWING";
+        let swingEntry = "-", swingTP = "-", swingSL = "-";
+
+        if (bull && rsiVal < 70 && macd > 0) {
+            swingSignal = "🔥 SWING BUY";
+            swingEntry = price.toFixed(2);
+            swingTP = (price * 1.03).toFixed(2);
+            swingSL = (price * 0.985).toFixed(2);
+        }
+
+        else if (bear && rsiVal > 30 && macd < 0) {
+            swingSignal = "🔥 SWING SELL";
+            swingEntry = price.toFixed(2);
+            swingTP = (price * 0.97).toFixed(2);
+            swingSL = (price * 1.015).toFixed(2);
+        }
+
+        // ================= SCALPING =================
+        let scalpSignal = "⚪ NO SCALP";
+        let scalpEntry = "-", scalpTP = "-", scalpSL = "-";
+
+        if (rsiVal < 50 && macd > 0) {
+            scalpSignal = "⚡ SCALP BUY";
+            scalpEntry = price.toFixed(2);
+            scalpTP = (price * 1.008).toFixed(2);
+            scalpSL = (price * 0.995).toFixed(2);
+        }
+
+        else if (rsiVal < 45 && macd > 0 && bull) {
+            scalpSignal = "🚀 STRONG SCALP BUY";
+            scalpEntry = price.toFixed(2);
+            scalpTP = (price * 1.012).toFixed(2);
+            scalpSL = (price * 0.993).toFixed(2);
+        }
+
+        else if (rsiVal > 50 && macd < 0) {
+            scalpSignal = "⚡ SCALP SELL";
+            scalpEntry = price.toFixed(2);
+            scalpTP = (price * 0.992).toFixed(2);
+            scalpSL = (price * 1.005).toFixed(2);
+        }
+
+        else if (rsiVal > 55 && macd < 0 && bear) {
+            scalpSignal = "💥 STRONG SCALP SELL";
+            scalpEntry = price.toFixed(2);
+            scalpTP = (price * 0.988).toFixed(2);
+            scalpSL = (price * 1.008).toFixed(2);
         }
 
         messages.push(
 `*${symbol}*
-Type: ${signal.type}
-Entry: ${signal.entry.toFixed(2)}
-TP: ${signal.tp.toFixed(2)}
-SL: ${signal.sl.toFixed(2)}`
+
+💰 Price: ${price}
+
+🔵 SWING:
+Signal: ${swingSignal}
+Entry: ${swingEntry}
+TP: ${swingTP}
+SL: ${swingSL}
+
+⚡ SCALP:
+Signal: ${scalpSignal}
+Entry: ${scalpEntry}
+TP: ${scalpTP}
+SL: ${scalpSL}
+
+📉 RSI: ${rsiVal.toFixed(2)}
+📈 MACD: ${macd.toFixed(2)}`
         );
     }
 
-    await send(messages.join("\n\n"));
+    if (messages.length) {
+        await send(messages.join("\n\n"));
+    }
 }
 
 run();
