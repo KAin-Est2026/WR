@@ -36,7 +36,7 @@ function rsi(values, period = 14) {
 }
 
 // ===== TELEGRAM =====
-async function sendMessage(text) {
+async function send(text) {
     try {
         await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
             chat_id: CHAT_ID,
@@ -44,7 +44,7 @@ async function sendMessage(text) {
             parse_mode: "Markdown"
         });
     } catch (e) {
-        console.log("TELEGRAM ERROR:", e.response?.data || e.message);
+        console.log("TG ERROR:", e.response?.data || e.message);
     }
 }
 
@@ -53,81 +53,79 @@ async function run() {
     let messages = [];
 
     for (let symbol of symbols) {
-        try {
-            const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1h&outputsize=120&apikey=${API_KEY}`;
-            const res = await axios.get(url);
 
-            if (!res.data || !res.data.values) {
-                console.log("API ERROR:", symbol, res.data);
-                continue;
-            }
+        const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1h&outputsize=120&apikey=${API_KEY}`;
+        const res = await axios.get(url);
 
-            let data = res.data.values.reverse();
-            let prices = data.map(d => parseFloat(d.close));
+        if (!res.data?.values) continue;
 
-            let last_price = prices.at(-1);
+        let data = res.data.values.reverse();
+        let prices = data.map(d => parseFloat(d.close));
 
-            // ===== INDICATORS =====
-            let ema9 = ema(prices, 9);
-            let ema21 = ema(prices, 21);
+        let price = prices.at(-1);
 
-            let rsiVal = rsi(prices);
+        let ema9 = ema(prices, 9);
+        let ema21 = ema(prices, 21);
 
-            let macd = ema(prices, 12).at(-1) - ema(prices, 26).at(-1);
+        let rsiVal = rsi(prices);
 
-            let bull = ema9.at(-1) > ema21.at(-1);
-            let bear = ema9.at(-1) < ema21.at(-1);
+        let macd = ema(prices, 12).at(-1) - ema(prices, 26).at(-1);
 
-            // ===== SCALPING =====
-            let scalpBuy = rsiVal < 45 && macd > 0;
-            let scalpSell = rsiVal > 55 && macd < 0;
+        let bull = ema9.at(-1) > ema21.at(-1);
+        let bear = ema9.at(-1) < ema21.at(-1);
 
-            let signal = "⚪ NO SIGNAL";
-            let tp = "-", sl = "-";
+        // =========================
+        // 🔵 SWING SYSTEM (1H trend)
+        // =========================
+        let swingSignal = "NO SWING";
+        let swingTP = "-", swingSL = "-";
 
-            // ===== SWING =====
-            if (bull && rsiVal < 70 && macd > 0) {
-                signal = "🔥 SWING BUY";
-                tp = (last_price * 1.03).toFixed(2);
-                sl = (last_price * 0.985).toFixed(2);
-            }
-
-            else if (bear && rsiVal > 30 && macd < 0) {
-                signal = "🔥 SWING SELL";
-                tp = (last_price * 0.97).toFixed(2);
-                sl = (last_price * 1.015).toFixed(2);
-            }
-
-            // ===== SCALP PRIORITY =====
-            if (scalpBuy) {
-                signal = "⚡ SCALP BUY";
-                tp = (last_price * 1.008).toFixed(2);
-                sl = (last_price * 0.995).toFixed(2);
-            }
-
-            if (scalpSell) {
-                signal = "⚡ SCALP SELL";
-                tp = (last_price * 0.992).toFixed(2);
-                sl = (last_price * 1.005).toFixed(2);
-            }
-
-            messages.push(
-`*${symbol}*
-Signal: ${signal}
-Price: ${last_price}
-TP: ${tp} | SL: ${sl}
-RSI: ${rsiVal.toFixed(2)}`
-            );
-
-        } catch (err) {
-            console.log("ERROR:", symbol, err.message);
+        if (bull && rsiVal < 70 && macd > 0) {
+            swingSignal = "🔥 SWING BUY";
+            swingTP = (price * 1.03).toFixed(2);
+            swingSL = (price * 0.985).toFixed(2);
         }
+
+        else if (bear && rsiVal > 30 && macd < 0) {
+            swingSignal = "🔥 SWING SELL";
+            swingTP = (price * 0.97).toFixed(2);
+            swingSL = (price * 1.015).toFixed(2);
+        }
+
+        // =========================
+        // ⚡ SCALPING SYSTEM (aggressive)
+        // =========================
+        let scalpSignal = "NO SCALP";
+        let scalpTP = "-", scalpSL = "-";
+
+        if (rsiVal < 48 && macd > 0) {
+            scalpSignal = "⚡ SCALP BUY";
+            scalpTP = (price * 1.008).toFixed(2);
+            scalpSL = (price * 0.995).toFixed(2);
+        }
+
+        else if (rsiVal > 52 && macd < 0) {
+            scalpSignal = "⚡ SCALP SELL";
+            scalpTP = (price * 0.992).toFixed(2);
+            scalpSL = (price * 1.005).toFixed(2);
+        }
+
+        messages.push(
+`*${symbol}*
+Price: ${price}
+
+🔵 Swing: ${swingSignal}
+TP: ${swingTP} | SL: ${swingSL}
+
+⚡ Scalp: ${scalpSignal}
+TP: ${scalpTP} | SL: ${scalpSL}
+
+RSI: ${rsiVal.toFixed(2)}`
+        );
     }
 
-    if (messages.length > 0) {
-        await sendMessage(messages.join("\n\n"));
-    } else {
-        console.log("No signals");
+    if (messages.length) {
+        await send(messages.join("\n\n"));
     }
 }
 
